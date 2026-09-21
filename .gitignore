@@ -23,6 +23,8 @@
 .swiftpm/
 migrate_working_dir/
 PLAN.md
+PLAN_*.md
+mobile-app-development-plan.md
 
 # ---------------------------------------------------------------------------
 # IDE - IntelliJ / Android Studio
