@@ -1,0 +1,69 @@
+name: Mobile Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version: $VERSION"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        run: |
+          cat > android/key.properties <<EOF
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Build APK
+        run: flutter build apk --release --build-name=${{ steps.version.outputs.version }}
+
+      - name: Calculate SHA-256
+        id: sha
+        run: |
+          SHA=$(sha256sum build/app/outputs/flutter-apk/app-release.apk | awk '{print $1}')
+          echo "$SHA" > app-release.sha256
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA-256: $SHA"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            app-release.sha256
+          body: |
+            ## Mobile App Release ${{ steps.version.outputs.version }}
+
+            ### Installation
+            Download `app-release.apk` and install on Android device.
+            Enable "Install from Unknown Sources" if prompted.
+
+            **SHA-256:** `${{ steps.sha.outputs.sha }}`
