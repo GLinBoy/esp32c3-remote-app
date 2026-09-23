@@ -2,10 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/models/device.dart';
 import '../../providers/app_providers.dart';
 import '../../services/mqtt_service.dart';
+import '../../services/update_service.dart';
+import '../../widgets/update_prompt.dart';
 import '../provisioning/ble_provisioning_screen.dart';
 import '../settings/broker_settings_screen.dart';
 
@@ -20,9 +23,15 @@ class DeviceListScreen extends ConsumerStatefulWidget {
 
 class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
   static const _backgroundDisconnectDelay = Duration(seconds: 30);
+  static const _updateCheckInterval = Duration(hours: 24);
+
+  final UpdateService _updateService = UpdateService();
 
   Timer? _backgroundTimer;
   Timer? _lastSeenTicker;
+  Timer? _updateTimer;
+  bool _checkingForUpdate = false;
+  String? _promptedVersion;
   late final AppLifecycleListener _lifecycleListener;
 
   @override
@@ -35,6 +44,12 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     _lastSeenTicker = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) setState(() {});
     });
+    _updateTimer = Timer.periodic(_updateCheckInterval, (_) {
+      unawaited(_checkForUpdates());
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkForUpdates());
+    });
   }
 
   @override
@@ -42,6 +57,7 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     _lifecycleListener.dispose();
     _backgroundTimer?.cancel();
     _lastSeenTicker?.cancel();
+    _updateTimer?.cancel();
     super.dispose();
   }
 
@@ -55,6 +71,55 @@ class _DeviceListScreenState extends ConsumerState<DeviceListScreen> {
     _backgroundTimer = Timer(_backgroundDisconnectDelay, () {
       unawaited(ref.read(mqttServiceProvider).disconnect());
     });
+  }
+
+  Future<void> _checkForUpdates() async {
+    if (_checkingForUpdate) return;
+    _checkingForUpdate = true;
+    try {
+      final info = await _updateService.checkForUpdate();
+      if (info == null || !mounted || info.version == _promptedVersion) return;
+      _promptedVersion = info.version;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => UpdatePrompt(
+          version: info.version,
+          onInstall: () => unawaited(_downloadAndInstall(info)),
+        ),
+      );
+    } finally {
+      _checkingForUpdate = false;
+    }
+  }
+
+  Future<void> _downloadAndInstall(UpdateInfo info) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(content: Text('Downloading update ${info.version}...')),
+    );
+
+    final apkFile = await _updateService.downloadUpdate(info.downloadUrl);
+    if (!mounted) return;
+    if (apkFile == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Update download failed. Please try again later.'),
+        ),
+      );
+      return;
+    }
+
+    messenger.hideCurrentSnackBar();
+    final started = await _updateService.installApk(apkFile);
+    if (!mounted || started) return;
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Allow installs from this app to finish updating.',
+        ),
+        action: SnackBarAction(label: 'Settings', onPressed: openAppSettings),
+      ),
+    );
   }
 
   Future<void> _rescan() => ref.read(devicesProvider.notifier).rescan();
