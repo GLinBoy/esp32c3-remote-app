@@ -148,3 +148,69 @@ ship it: move to a private broker with authentication and TLS (`mqtts://`, port 
 - iOS build (assets and icon set are already in the repo)
 - Optional Android foreground service for background control
 - More device types (the registry/topic scheme extends naturally)
+
+---
+
+## CI/CD Pipeline
+
+This project uses GitHub Actions for continuous integration and releases.
+
+### Workflows
+
+- **`mobile-ci.yml`**: Runs `flutter analyze` and `flutter test` on every push/PR
+- **`mobile-release.yml`**: Builds signed release APK on semver tags
+
+### Creating a Release
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+GitHub Actions will:
+
+1. Build signed release APK with version `1.1.0`
+2. Generate SHA-256 checksum
+3. Create GitHub Release with `app-release.apk` and checksum
+
+### APK Signing
+
+The release APK is signed with a persistent keystore stored as GitHub encrypted secret.
+This ensures:
+
+- APK installs without "unsigned app" warnings
+- In-place updates (no uninstall required)
+- Same signature across all releases
+
+**For contributors**: If setting up your own fork, generate a keystore:
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+```
+
+Then store as GitHub secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+
+---
+
+## Self-Distribution & Auto-Update
+
+This app is **not distributed via Play Store**. Users install APK directly from GitHub Releases.
+
+### Installing
+
+1. Download `app-release.apk` from [Releases](https://github.com/GLinBoy/esp32c3-remote-app/releases)
+2. Enable "Install from Unknown Sources" on Android device (Settings → Security)
+3. Open APK file → Tap "Install"
+
+### Auto-Update
+
+The app checks GitHub Releases API on startup for newer versions.
+When an update is available:
+
+1. Dialog prompts: "Update available: vX.Y.Z. Install now?"
+2. Tap "Install" → APK downloads in background
+3. Android install prompt appears → Tap "Install" again
+4. App updates in place (no data loss)
+
+**Note**: Silent install is NOT possible on stock Android without root.
+User must confirm install (Android security requirement).
